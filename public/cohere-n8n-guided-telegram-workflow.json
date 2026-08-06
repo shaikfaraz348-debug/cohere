@@ -1,0 +1,462 @@
+{
+  "name": "Co.Here Guided Telegram Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "telegram-trigger",
+      "name": "Receive Telegram Message",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        120,
+        320
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ADD_YOUR_CREDENTIAL",
+          "name": "Add your Telegram BotFather credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const message = $json.message || {};\nconst chatId = message.chat?.id;\nconst text = String(message.text || '').trim();\nconst lower = text.toLowerCase();\nconst store = $getWorkflowStaticData('global');\nstore.sessions ||= {};\nconst key = String(chatId);\nlet session = store.sessions[key] || { step: 'menu', flow: '', data: {} };\n\nconst menu = () => [\n  'Hello! I am the Co.Here Community Information Assistant.',\n  '',\n  'Choose an option by sending its number:',\n  '1. View current community information',\n  '2. Submit an update or event',\n  '3. Check submission status',\n  '4. Submit a new community',\n  '5. How this service works',\n].join('\\n');\n\nconst saveReply = (step, reply) => {\n  session.step = step;\n  store.sessions[key] = session;\n  return [{ json: { action: 'reply', chat_id: chatId, reply } }];\n};\n\nconst reset = () => {\n  session = { step: 'menu', flow: '', data: {} };\n  store.sessions[key] = session;\n};\n\nconst cleanOptional = (value) => ['skip', 'none', 'n/a', 'no'].includes(value.toLowerCase()) ? '' : value;\n\nconst summary = () => {\n  const d = session.data;\n  return [\n    'Please review your submission:',\n    '',\n    'Community: ' + (d.community_name || 'Not provided'),\n    'Area: ' + (d.area || 'Not provided'),\n    'Type: ' + (d.update_type || 'Not provided'),\n    'Details: ' + (d.proposed_update || 'Not provided'),\n    'Date/time: ' + (d.schedule || 'Not provided'),\n    'Location: ' + (d.location || 'Not provided'),\n    'Link: ' + (d.link || 'Not provided'),\n    'Organiser: ' + (d.organiser_name || 'Not provided'),\n    'Contact: ' + (d.contact || 'Not provided'),\n    '',\n    'Send CONFIRM to submit, EDIT to restart, or CANCEL.',\n  ].join('\\n');\n};\n\nif (!chatId) return [];\n\nif (['/start', 'start', 'hi', 'hello', 'hi cohere', 'menu', '/menu'].includes(lower)) {\n  reset();\n  return saveReply('menu', menu());\n}\n\nif (lower === 'cancel') {\n  reset();\n  return saveReply('menu', 'Your current entry was cancelled.\\n\\n' + menu());\n}\n\nswitch (session.step) {\n  case 'menu':\n    if (lower === '1') return saveReply('lookup_name', 'Enter the community name you want to view.');\n    if (lower === '2') {\n      session.flow = 'update'; session.data = {};\n      return saveReply('update_name', 'What is the name of the existing community?');\n    }\n    if (lower === '3') return saveReply('status_reference', 'Enter your submission reference, for example TG-123456.');\n    if (lower === '4') {\n      session.flow = 'new'; session.data = {};\n      return saveReply('new_type', 'What type of community is this?\\nExample: sports, arts, language, family support or wellbeing.');\n    }\n    if (lower === '5') return saveReply('menu', 'Community organisers can view approved information or submit changes. Confirmed submissions enter the staff Review Queue. Nothing is published automatically.\\n\\n' + menu());\n    return saveReply('menu', 'Please send a number from 1 to 5.\\n\\n' + menu());\n\n  case 'lookup_name':\n    delete store.sessions[key];\n    return [{ json: { action: 'lookup', chat_id: chatId, lookup_name: text } }];\n\n  case 'status_reference':\n    delete store.sessions[key];\n    return [{ json: { action: 'status', chat_id: chatId, reference: text.toUpperCase() } }];\n\n  case 'update_name':\n    session.data.community_name = text;\n    return saveReply('update_area', 'Which town or area is the community in?');\n  case 'update_area':\n    session.data.area = text;\n    return saveReply('update_kind', 'What are you updating?\\n1. Event or activity\\n2. Community profile');\n  case 'update_kind':\n    if (!['1', '2'].includes(lower)) return saveReply('update_kind', 'Please send 1 for an event/activity or 2 for a community profile.');\n    session.data.update_type = lower === '1' ? 'Event update' : 'Community profile update';\n    return saveReply('update_details', lower === '1' ? 'What is the event name and what has changed?' : 'Describe the information that should be changed.');\n  case 'update_details':\n    session.data.proposed_update = text;\n    session.data.description = text;\n    return saveReply('update_schedule', 'Enter the event date and time. If this does not apply, send SKIP.');\n  case 'update_schedule':\n    session.data.schedule = cleanOptional(text);\n    return saveReply('update_venue_choice', 'Where will it happen?\\n1. Usual community venue\\n2. Another location');\n  case 'update_venue_choice':\n    if (lower === '1') {\n      session.data.location = 'Usual community venue';\n      return saveReply('shared_link', 'Add a website or map link, or send SKIP.');\n    }\n    if (lower === '2') return saveReply('update_location', 'Enter the venue name or full location.');\n    return saveReply('update_venue_choice', 'Please send 1 for the usual venue or 2 for another location.');\n  case 'update_location':\n    session.data.location = text;\n    return saveReply('shared_link', 'Add a website or map link, or send SKIP.');\n\n  case 'new_type':\n    session.data.category = text;\n    session.data.update_type = 'New community';\n    return saveReply('new_name', 'What is the community or group name?');\n  case 'new_name':\n    session.data.community_name = text;\n    return saveReply('new_area', 'Which town or area is it in?');\n  case 'new_area':\n    session.data.area = text;\n    return saveReply('new_description', 'Briefly describe what the community offers.');\n  case 'new_description':\n    session.data.description = text;\n    session.data.proposed_update = text;\n    return saveReply('new_schedule', 'Enter its regular date and time, or send SKIP if unknown.');\n  case 'new_schedule':\n    session.data.schedule = cleanOptional(text);\n    return saveReply('new_location', 'Enter the venue or location, or send SKIP if unknown.');\n  case 'new_location':\n    session.data.location = cleanOptional(text);\n    return saveReply('shared_link', 'Add a website or map link, or send SKIP.');\n\n  case 'shared_link':\n    session.data.link = cleanOptional(text);\n    return saveReply('shared_organiser', 'Who is submitting this information? Enter the organiser\\'s name.');\n  case 'shared_organiser':\n    session.data.organiser_name = text;\n    return saveReply('shared_contact', 'Enter a contact email or phone number, or send SKIP.');\n  case 'shared_contact':\n    session.data.contact = cleanOptional(text);\n    return saveReply('confirm', summary());\n  case 'confirm':\n    if (lower === 'confirm') {\n      const payload = { ...session.data, telegram_user: message.from?.username || message.from?.first_name || 'Telegram organiser' };\n      delete store.sessions[key];\n      return [{ json: { action: 'submit', chat_id: chatId, ...payload } }];\n    }\n    if (lower === 'edit') {\n      const flow = session.flow;\n      session.data = {};\n      return flow === 'new'\n        ? saveReply('new_type', 'Let\\'s restart. What type of community is this?')\n        : saveReply('update_name', 'Let\\'s restart. What is the existing community name?');\n    }\n    return saveReply('confirm', 'Please send CONFIRM, EDIT or CANCEL.\\n\\n' + summary());\n  default:\n    reset();\n    return saveReply('menu', menu());\n}"
+      },
+      "id": "conversation-controller",
+      "name": "Guided Conversation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-submit",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "submit",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-submit",
+      "name": "Confirmed Submission?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5173/api/telegram-webhook",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-cohere-prototype-key",
+              "value": "cohere-demo-2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "submit-api",
+      "name": "Send Confirmed Update to Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        860,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Guided Conversation').item.json.chat_id }}",
+        "text": "={{ $json.telegram_reply || 'Thank you. Your information is pending Community Liaison review.' }}",
+        "additionalFields": {}
+      },
+      "id": "reply-submit",
+      "name": "Reply with Pending Reference",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        180
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ADD_YOUR_CREDENTIAL",
+          "name": "Add your Telegram BotFather credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-lookup",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "lookup",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-lookup",
+      "name": "Community Lookup?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        820,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5173/api/communities",
+        "options": {}
+      },
+      "id": "get-communities",
+      "name": "Get Approved Communities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1060,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const q = String($('Guided Conversation').item.json.lookup_name || '').toLowerCase();\nconst rows = $json.communities || [];\nconst found = rows.find(r => String(r.name).toLowerCase().includes(q));\nconst reply = found ? `Approved community information\\n\\nName: ${found.name}\\nArea: ${found.area}\\nCategory: ${found.category}\\nSchedule: ${found.schedule}\\nLocation: ${found.location}\\nContact: ${found.contact}\\nStatus: ${found.health}` : `I could not find an approved record for “${$('Guided Conversation').item.json.lookup_name}”. A Community Liaison can help.`;\nreturn [{json:{chat_id:$('Guided Conversation').item.json.chat_id,reply}}];"
+      },
+      "id": "format-community",
+      "name": "Format Community Information",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1280,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "reply-lookup",
+      "name": "Reply with Community Information",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1500,
+        340
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ADD_YOUR_CREDENTIAL",
+          "name": "Add your Telegram BotFather credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is-status",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "status",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-status",
+      "name": "Status Check?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        520
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:5173/api/submissions",
+        "options": {}
+      },
+      "id": "get-submissions",
+      "name": "Get Submission Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1260,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ref = String($('Guided Conversation').item.json.reference || '').toUpperCase();\nconst rows = $json.submissions || [];\nconst found = rows.find(r => String(r.reference).toUpperCase() === ref);\nconst reply = found ? `Submission ${found.reference}\\nCommunity: ${found.communityName}\\nStatus: ${found.status}\\nSubmitted by: ${found.submittedBy}` : `I could not find submission ${ref}. Please check the reference or contact a Community Liaison.`;\nreturn [{json:{chat_id:$('Guided Conversation').item.json.chat_id,reply}}];"
+      },
+      "id": "format-status",
+      "name": "Format Submission Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "reply-status",
+      "name": "Reply with Submission Status",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        480
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ADD_YOUR_CREDENTIAL",
+          "name": "Add your Telegram BotFather credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.reply }}",
+        "additionalFields": {}
+      },
+      "id": "reply-question",
+      "name": "Ask Next Question",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1260,
+        640
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "ADD_YOUR_CREDENTIAL",
+          "name": "Add your Telegram BotFather credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "GUIDED DEMO\\n\\nSend Hi or /start. The assistant remembers the current question for each Telegram chat. Confirmed information is sent to the website as Pending Review; nothing is published automatically.",
+        "height": 190,
+        "width": 370
+      },
+      "id": "instructions",
+      "name": "How to test",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        300,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Receive Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Guided Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guided Conversation": {
+      "main": [
+        [
+          {
+            "node": "Confirmed Submission?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmed Submission?": {
+      "main": [
+        [
+          {
+            "node": "Send Confirmed Update to Website",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Community Lookup?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Confirmed Update to Website": {
+      "main": [
+        [
+          {
+            "node": "Reply with Pending Reference",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Community Lookup?": {
+      "main": [
+        [
+          {
+            "node": "Get Approved Communities",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Status Check?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Approved Communities": {
+      "main": [
+        [
+          {
+            "node": "Format Community Information",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Community Information": {
+      "main": [
+        [
+          {
+            "node": "Reply with Community Information",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Status Check?": {
+      "main": [
+        [
+          {
+            "node": "Get Submission Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ask Next Question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Submission Status": {
+      "main": [
+        [
+          {
+            "node": "Format Submission Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Submission Status": {
+      "main": [
+        [
+          {
+            "node": "Reply with Submission Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "cohere-guided-telegram-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
