@@ -7,12 +7,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       status: "success",
-      reply: "Message received successfully"
+      reply: "Message received successfully",
+      received: body
     });
   } catch (error) {
     return NextResponse.json({
       status: "error",
-      message: "Invalid JSON body"
+      message: "Invalid JSON"
     }, { status: 400 });
   }
 }
